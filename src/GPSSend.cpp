@@ -35,7 +35,6 @@ constexpr int port = 8088;
 #define DBG_PRT
 #if defined(DBG_PRT)
 int prt;
-uint32_t crcBuf[1024];
 #endif
 
 #if defined(RTK_SEND)
@@ -52,6 +51,16 @@ AsyncServer server(port);
 #endif	/* RTK_RECV */
 
 char ipAddress[20];
+
+#include "dbgPin.h"
+
+#define GPS_LIB
+
+#if defined(GPS_LIB)
+
+#include "gpsLib.h"
+
+#else
 
 enum RCV_STATE {RCV_IDLE, RCV_GET_LEN, RCV_GET_DATA, RCV_TEXT};
 
@@ -73,11 +82,6 @@ typedef struct S_RTK_DATA
  int svCount[4];
 } T_RTK_DATA, *P_RTK_DATA;
 
-T_RTK_DATA rtk;
-
-char cons[5] = "PLBA";
-const char *names[] = {"GPS", "GLO", "BDS", "GAL"};
-
 #define MAX_SIG 4
 #define MAX_SAT 100
 
@@ -97,15 +101,21 @@ typedef struct S_SAT_DATA
  T_FREQ_INFO sig[MAX_SIG];
 } T_SAT_DATA, *P_SAT_DATA;
 
+T_RTK_DATA rtk;
+
 S_SAT_DATA satData[MAX_SAT];
 int satIndex;
  
+char cons[5] = "PLBA";
+const char *names[] = {"GPS", "GLO", "BDS", "GAL"};
+
 #if defined(RTK_SEND)
 bool sendBinary(const uint8_t *data, size_t len);
 #endif	/* RTK_SEND */
 
-#define DBG0_PIN 4
-#define DBG1_PIN 5
+#endif	/* NO_GPS_LIB */
+
+#if !defined(GPS_LIB)
 
 inline void dbg0Set()
 {
@@ -129,15 +139,22 @@ inline void dbg1Clr()
 
 void printHex(const uint8_t *data, size_t len);
 
-char* nextArg(char* p0);
+char *nextArg(char* p0);
 char *getNum(char *p0, int n, int *result);
 int getNum(char **p0, int n);
 int getNum(char **p0);
 int getHex(char **p0);
 
-static void buildCRC24qTable();
+void buildCRC24qTable();
 inline uint32_t crc24(uint32_t crc, unsigned char c);
-static uint32_t crc24qTable[256];
+uint32_t crc24qTable[256];
+
+void processRemData(void *data, size_t len);
+void processSerial();
+void gpsLoc();
+void gpsSat();
+
+#endif	/* GPS_LIB */
 
 #if defined(USE_U8X8)
 
@@ -153,8 +170,6 @@ void clearLine(char line);
 void erase(char x, char y, char len);
 
 #endif	/* USE_U8X8 */
-
-void processSerial();
 
 bool connected;
 unsigned int connectTmr;
@@ -183,13 +198,8 @@ void onConnect(void *arg, AsyncClient *c)
 void onData(void *arg, AsyncClient *c, void *data, size_t len)
 {
  printf("[TCP] Received %u bytes: ", len);
-// Serial.write(static_cast<uint8_t *>(data), len);
-// Serial.println();
 }
 
-// Called when the remote peer ACKs `len` bytes.
-// Note: `len` is cumulative per ack — may not equal your full payload in one shot
-// if TCP batches or splits acknowledgements.
 void onAck(void* arg, AsyncClient* c, size_t len, uint32_t time)
 {
  printf("[TCP] ACK: %u bytes acknowledged, round-trip ~%u ms\n",
@@ -200,17 +210,12 @@ void onAck(void* arg, AsyncClient* c, size_t len, uint32_t time)
  if (lastSend.bytesSent == 0)
  {
   printf("[TCP] Send complete: all bytes acknowledged\n");
-  // ── Put your post-send logic here ─────────────────────────
-  // e.g. free a buffer, signal a FreeRTOS task, queue next packet
-  // ──────────────────────────────────────────────────────────
  }
 }
 
 void onDisconnect(void *arg, AsyncClient *c)
 {
  printf("[TCP] Disconnected\n");
- // AsyncTCP will delete the client object itself on disconnect;
- // just null our pointer so loop() knows to reconnect.
  c->close();
  client = nullptr;
 
@@ -233,6 +238,7 @@ void onTimeout(void *arg, AsyncClient *c, uint32_t time)
 }
 
 // ── Connection helper ────────────────────────────────────────────────────────
+
 void connectToServer()
 {
  if (client)
@@ -310,95 +316,7 @@ static void onClientData(void *arg, AsyncClient *c,
         c->remoteIP().toString().c_str(),
         c->remotePort(), static_cast<unsigned int>(len));
 
- // --- Process your binary payload here ---
-// const auto *bytes = static_cast<const uint8_t *>(data);
-// printHex(bytes, len);
-
- const auto *ptr = static_cast<char *>(data);
- while (len > 0)
- {
-  len -= 1;
-  const char ch = *ptr++;
-  switch (rtk.state)
-  {
-  case RCV_IDLE:
-   if (ch == 0xd3)
-   {
-    rtk.count = 2;
-    Serial2.write(ch);
-    rtk.buf[0] = ch;
-    rtk.crc = crc24qTable[ch];
-    crcBuf[0] = rtk.crc;
-    rtk.fil = 1;
-    rtk.t0 = millis();
-    rtk.state = RCV_GET_LEN;
-   }
-   else if (ch == '$')
-   {
-    rtk.t0 = millis();
-    rtk.state = RCV_TEXT;
-   }
-   break;
-    
-  case RCV_GET_LEN:
-   Serial2.write(ch);
-   rtk.crc = ((rtk.crc << 8) ^ crc24qTable[((rtk.crc >> 16) ^ ch) & 0xFFu]) & 0xFFFFFFu;
-   crcBuf[rtk.fil] = rtk.crc;
-   rtk.len = (rtk.len << 8) + ch;
-   rtk.buf[rtk.fil] = ch;
-   rtk.fil += 1;
-   rtk.count -= 1;
-   if (rtk.count == 0)
-   {
-    rtk.state = RCV_GET_DATA;
-    rtk.len &= 0x3ff;
-    // printf("dLen %d\n", dLen);
-#if defined(DBG_PRT)
-    //if ((prt == 0) && (rtk.len == 19))
-    if (rtk.len == 19)
-    {
-     prt = 1;
-    }
-#endif	/* DBG_PRT */
-    rtk.len += 3;
-   }
-   break;
-
-  case RCV_GET_DATA:
-   Serial2.write(ch);
-   rtk.crc = ((rtk.crc << 8) ^ crc24qTable[((rtk.crc >> 16) ^ ch) & 0xFFu]) & 0xFFFFFFu;
-   crcBuf[rtk.fil] = rtk.crc;
-   rtk.buf[rtk.fil] = ch;
-   rtk.fil += 1;
-   rtk.len -= 1;
-   if (rtk.len == 0)
-   {
-    const int type = (rtk.buf[3] << 4) | (rtk.buf[4] >> 4);
-    printf("len %4d type %4d CRC %08x\n", rtk.fil, type, static_cast<unsigned int>(rtk.crc));
-#if defined(DBG_PRT)
-    if (prt == 1)
-    {
-     printHex(reinterpret_cast<const uint8_t *>(rtk.buf), rtk.fil);
-     printHex(reinterpret_cast<const uint8_t *>(crcBuf), rtk.fil << 2);
-     prt = 0;
-    }
-#endif	/* DBG_PRT */
-    rtk.state = RCV_IDLE;
-   }
-   break;
-
-  case RCV_TEXT:
-   if (ch == '\n')
-   {
-    rtk.state = RCV_IDLE;
-   }
-   else
-   {
-
-   }
-   break;
-  }
- }
+ processRemData(data, len);
 }
 
 static void onClientError(void *arg, AsyncClient *c, int8_t error)
@@ -620,7 +538,24 @@ void loop()
   }
  }
  processSerial();
+
+#if defined(USE_U8X8)
+ if (gpsInfo.update)
+ {
+  char buf[20];
+  drawString(0, 2, gpsInfo.timeBuf);
+  snprintf(buf, sizeof(buf), "%d %2d   ", gpsInfo.fix, gpsInfo.sats);
+  drawString(9, 2, buf);  // 9 10 11 12 13 14 15
+
+  snprintf(buf, sizeof(buf), " %13.10f", gpsInfo.lat);
+  drawString(0, 3, buf);
+  snprintf(buf, sizeof(buf), "%14.10f", gpsInfo.lon);
+  drawString(0, 4, buf);
+ }
+#endif	/* USE_U8X8 */
 }
+
+#if !defined(GPS_LIB)
 
 void processSerial()
 {
@@ -737,166 +672,13 @@ void processSerial()
      }
      printf("%s\n", static_cast<const char *>(rtk.buf));
 
-     /* $GNGGA, 091628.00, 3844.78718183,N, 07755.96337656,W, 7,28,0.5,135.9670,M,-33.6653,M,,*44 */
      if (strncmp(rtk.buf, "$GNGGA", 6) == 0)
      {
-      char *p = nextArg(rtk.buf);
-
-#if defined(USE_U8X8)
-      char *p0 = p;
-      char buf[20];
-      char *p1 = buf;
-      *p1++ = *p0++;		/* 0 */
-      *p1++ = *p0++;		/* 1 */
-      *p1++ = ':';		/* 2 */
-      *p1++ = *p0++;		/* 3 */
-      *p1++ = *p0++;		/* 4 */
-      *p1++ = ':';		/* 5 */
-      *p1++ = *p0++;		/* 6 */
-      *p1++ = *p0;		/* 7 */
-      *p1++ = ' ';		/* 8 */
-      *p1++ = ' ';		/* 9 */
-      *p1 = 0;
-      drawString(0, 2, buf);
-#endif	/* USE_U8X8 */
-
-      int gpsTime = getNum(&p, 2) * 60;
-      gpsTime += getNum(&p, 2);
-      gpsTime *= 60;
-      gpsTime += getNum(&p, 2);
-
-      p = nextArg(p);
-      int tmp = getNum(&p, 2);
-      const double lat = static_cast<double>(tmp) + strtod(p, &p) / 60.0;
-      p = nextArg(p);
-      p = nextArg(p);
-      tmp = getNum(&p, 3);
-      double lon = (static_cast<double>(tmp) + strtod(p, &p) / 60.0);
-      p = nextArg(p);
-      if (*p == 'W')
-       lon = -lon;
-      p = nextArg(p);
-      int fix = getNum(&p);
-      int sats = getNum(&p);
-      printf("gpsTime %6d lat %-14.10f lon %-14.10f fix %d sats %2d\n",
-      gpsTime, lat, lon, fix, sats);
-
-#if defined(USE_U8X8)
-      snprintf(buf, sizeof(buf), "%d %2d   ", fix, sats);
-      drawString(9, 2, buf);  // 9 10 11 12 13 14 15
-
-      snprintf(buf, sizeof(buf), " %13.10f", lat);
-      drawString(0, 3, buf);
-      snprintf(buf, sizeof(buf), "%14.10f", lon);
-      drawString(0, 4, buf);
-#endif	/* USE_U8X8 */
-
+      gpsLoc();
      }
      else if (rtk.buf[1] == 'G' && strncmp(&rtk.buf[3], "GSV", 3) == 0)
      {
-      if (rtk.svTmr == 0)
-      {
-       printf("***start svTmr\n");
-       satIndex = 0;
-      }
-      rtk.svTmr = millis();
-
-      char c0 = rtk.buf[2];
-      int satCons = -1;
-      for (int i = 0; i < sizeof(cons) - 1; i++)
-      {
-       if (c0 == cons[i])
-       {
-        satCons = i;
-        break;
-       }
-      }
-
-      if (satCons >= 0)
-      {
-       const char* txtEnd = &rtk.buf[rtk.fil];
-       int freq = -1;
-       for (int i = 0; i < 3; i++)
-       {
-        const char c2 = *--txtEnd;
-        if (c2 == '*')
-        {
-         txtEnd -= 1;
-         puts(txtEnd);
-         freq = *txtEnd - '0';
-         break;
-        }
-       }
-       printf("constellation %d %s freq %d\n", satCons, names[satCons], freq);
-
-       char* p = nextArg(rtk.buf); /* skip name */
-       int numMsg = getNum(&p);
-       int msgNum = getNum(&p);
-       int numSv =  getNum(&p);
-       if (msgNum == 1)
-        rtk.numSv = numSv;
-       printf("numMsg %d msgNum %d numSv %d\n", numMsg, msgNum, numSv);
-       int n = rtk.numSv > 4 ? 4 : rtk.numSv;
-       for (int i = 0; i < n; i++)
-       {
-        int sVid = getNum(&p);
-        int elv = getNum(&p);
-        int az = getNum(&p);
-        int cno = getNum(&p);
-        printf("%2d %2d sVid %2d elv %2d az %3d ", satIndex, rtk.numSv, sVid, elv, az);
-
-        int j;
-        for (j = 0; j <= satIndex; j++)
-        {
-         P_SAT_DATA rec = &satData[j];
-         if (satCons == rec->cons && sVid == rec->sVid)
-         {
-          if (rec->freqs < MAX_SIG)
-          {
-           P_FREQ_INFO f = &rec->sig[rec->freqs];
-           rec->freqs += 1;
-           f->freq = freq;
-           f->cno = cno;
-           printf("n %d freq %d cno %2d\n", rec->freqs, f->freq, f->cno);
-           break;
-          }
-         }
-        }
-
-        if (j > satIndex)
-        {
-         rtk.svCount[satCons] += 1;
-         P_SAT_DATA rec = &satData[satIndex];
-         rec->cons = satCons;
-         rec->sVid = sVid;
-         rec->elv = elv;
-         rec->az = az;
-         rec->freqs = 1;
-         P_FREQ_INFO f = rec->sig;
-         memset(f, 0, sizeof(rec->sig));
-         f->freq = freq;
-         f->cno = cno;
-         if (satIndex < MAX_SAT)
-          satIndex += 1;
-         printf("n %d freq %d cno %2d\n", rec->freqs, f->freq, f->cno);
-        }
-
-        rtk.numSv -= 1;
-       }
-       printf("satCons %d count %d\n", satCons, rtk.svCount[satCons]);
-
-       int total = 0;
-       int *pC = rtk.svCount;
-       for (int i = 0; i < 4; i++)
-       {
-        total += *pC;
-        printf("%2d ", *pC);
-        pC++;
-       }
-       printf("%2d\n", total);
-
-      }
-      printf("\n");
+      gpsSat();
      }
     }
     rtk.state = RCV_IDLE;
@@ -911,6 +693,264 @@ void processSerial()
   dbg1Clr();
  }
 }
+
+/* $GNGGA, 091628.00, 3844.78718183,N, 07755.96337656,W, 7,28,0.5,135.9670,M,-33.6653,M,,*44 */
+
+void gpsLoc()
+{
+ char *p = nextArg(rtk.buf);
+
+#if defined(USE_U8X8)
+ char *p0 = p;
+ char buf[20];
+ char *p1 = buf;
+ *p1++ = *p0++;		/* 0 */
+ *p1++ = *p0++;		/* 1 */
+ *p1++ = ':';		/* 2 */
+ *p1++ = *p0++;		/* 3 */
+ *p1++ = *p0++;		/* 4 */
+ *p1++ = ':';		/* 5 */
+ *p1++ = *p0++;		/* 6 */
+ *p1++ = *p0;		/* 7 */
+ *p1++ = ' ';		/* 8 */
+ *p1++ = ' ';		/* 9 */
+ *p1 = 0;
+ drawString(0, 2, buf);
+#endif	/* USE_U8X8 */
+
+ int gpsTime = getNum(&p, 2) * 60;
+ gpsTime += getNum(&p, 2);
+ gpsTime *= 60;
+ gpsTime += getNum(&p, 2);
+
+ p = nextArg(p);
+ int tmp = getNum(&p, 2);
+ const double lat = static_cast<double>(tmp) + strtod(p, &p) / 60.0;
+ p = nextArg(p);
+ p = nextArg(p);
+ tmp = getNum(&p, 3);
+ double lon = (static_cast<double>(tmp) + strtod(p, &p) / 60.0);
+ p = nextArg(p);
+ if (*p == 'W')
+  lon = -lon;
+ p = nextArg(p);
+ int fix = getNum(&p);
+ int sats = getNum(&p);
+ printf("gpsTime %6d lat %-14.10f lon %-14.10f fix %d sats %2d\n",
+	gpsTime, lat, lon, fix, sats);
+
+#if defined(USE_U8X8)
+ snprintf(buf, sizeof(buf), "%d %2d   ", fix, sats);
+ drawString(9, 2, buf);  // 9 10 11 12 13 14 15
+
+ snprintf(buf, sizeof(buf), " %13.10f", lat);
+ drawString(0, 3, buf);
+ snprintf(buf, sizeof(buf), "%14.10f", lon);
+ drawString(0, 4, buf);
+#endif	/* USE_U8X8 */
+}
+
+void gpsSat()
+{
+ if (rtk.svTmr == 0)
+ {
+  printf("***start svTmr\n");
+  satIndex = 0;
+ }
+ rtk.svTmr = millis();
+
+ char c0 = rtk.buf[2];
+ int satCons = -1;
+ for (int i = 0; i < sizeof(cons) - 1; i++)
+ {
+  if (c0 == cons[i])
+  {
+   satCons = i;
+   break;
+  }
+ }
+
+ if (satCons >= 0)
+ {
+  const char* txtEnd = &rtk.buf[rtk.fil];
+  int freq = -1;
+  for (int i = 0; i < 3; i++)
+  {
+   const char c2 = *--txtEnd;
+   if (c2 == '*')
+   {
+    txtEnd -= 1;
+    puts(txtEnd);
+    freq = *txtEnd - '0';
+    break;
+   }
+  }
+  printf("constellation %d %s freq %d\n", satCons, names[satCons], freq);
+
+  char* p = nextArg(rtk.buf); /* skip name */
+  int numMsg = getNum(&p);
+  int msgNum = getNum(&p);
+  int numSv =  getNum(&p);
+  if (msgNum == 1)
+   rtk.numSv = numSv;
+  printf("numMsg %d msgNum %d numSv %d\n", numMsg, msgNum, numSv);
+  int n = rtk.numSv > 4 ? 4 : rtk.numSv;
+  for (int i = 0; i < n; i++)
+  {
+   int sVid = getNum(&p);
+   int elv = getNum(&p);
+   int az = getNum(&p);
+   int cno = getNum(&p);
+   printf("%2d %2d sVid %2d elv %2d az %3d ", satIndex, rtk.numSv, sVid, elv, az);
+
+   int j;
+   for (j = 0; j <= satIndex; j++)
+   {
+    P_SAT_DATA rec = &satData[j];
+    if (satCons == rec->cons && sVid == rec->sVid)
+    {
+     if (rec->freqs < MAX_SIG)
+     {
+      P_FREQ_INFO f = &rec->sig[rec->freqs];
+      rec->freqs += 1;
+      f->freq = freq;
+      f->cno = cno;
+      printf("n %d freq %d cno %2d\n", rec->freqs, f->freq, f->cno);
+      break;
+     }
+    }
+   }
+
+   if (j > satIndex)
+   {
+    rtk.svCount[satCons] += 1;
+    P_SAT_DATA rec = &satData[satIndex];
+    rec->cons = satCons;
+    rec->sVid = sVid;
+    rec->elv = elv;
+    rec->az = az;
+    rec->freqs = 1;
+    P_FREQ_INFO f = rec->sig;
+    memset(f, 0, sizeof(rec->sig));
+    f->freq = freq;
+    f->cno = cno;
+    if (satIndex < MAX_SAT)
+     satIndex += 1;
+    printf("n %d freq %d cno %2d\n", rec->freqs, f->freq, f->cno);
+   }
+
+   rtk.numSv -= 1;
+  }
+  printf("satCons %d count %d\n", satCons, rtk.svCount[satCons]);
+
+  int total = 0;
+  int *pC = rtk.svCount;
+  for (int i = 0; i < 4; i++)
+  {
+   total += *pC;
+   printf("%2d ", *pC);
+   pC++;
+  }
+  printf("%2d\n", total);
+
+ }
+ printf("\n");
+}
+
+#if defined(RTK_RECV)
+
+void processRemData(void *data, size_t len)
+{
+ const auto *ptr = static_cast<char *>(data);
+ while (len > 0)
+ {
+  len -= 1;
+  const char ch = *ptr++;
+  switch (rtk.state)
+  {
+  case RCV_IDLE:
+   if (ch == 0xd3)
+   {
+    rtk.count = 2;
+    Serial2.write(ch);
+    rtk.buf[0] = ch;
+    rtk.crc = crc24qTable[ch];
+    crcBuf[0] = rtk.crc;
+    rtk.fil = 1;
+    rtk.t0 = millis();
+    rtk.state = RCV_GET_LEN;
+   }
+   else if (ch == '$')
+   {
+    rtk.t0 = millis();
+    rtk.state = RCV_TEXT;
+   }
+   break;
+    
+  case RCV_GET_LEN:
+   Serial2.write(ch);
+   rtk.crc = ((rtk.crc << 8) ^ crc24qTable[((rtk.crc >> 16) ^ ch) & 0xFFu]) & 0xFFFFFFu;
+   crcBuf[rtk.fil] = rtk.crc;
+   rtk.len = (rtk.len << 8) + ch;
+   rtk.buf[rtk.fil] = ch;
+   rtk.fil += 1;
+   rtk.count -= 1;
+   if (rtk.count == 0)
+   {
+    rtk.state = RCV_GET_DATA;
+    rtk.len &= 0x3ff;
+    // printf("dLen %d\n", dLen);
+#if defined(DBG_PRT)
+    //if ((prt == 0) && (rtk.len == 19))
+    if (rtk.len == 19)
+    {
+     prt = 1;
+    }
+#endif	/* DBG_PRT */
+    rtk.len += 3;
+   }
+   break;
+
+  case RCV_GET_DATA:
+   Serial2.write(ch);
+   rtk.crc = ((rtk.crc << 8) ^ crc24qTable[((rtk.crc >> 16) ^ ch) & 0xFFu]) & 0xFFFFFFu;
+   crcBuf[rtk.fil] = rtk.crc;
+   rtk.buf[rtk.fil] = ch;
+   rtk.fil += 1;
+   rtk.len -= 1;
+   if (rtk.len == 0)
+   {
+    const int type = (rtk.buf[3] << 4) | (rtk.buf[4] >> 4);
+    printf("len %4d type %4d CRC %08x\n", rtk.fil, type, static_cast<unsigned int>(rtk.crc));
+#if defined(DBG_PRT)
+    if (prt == 1)
+    {
+     printHex(reinterpret_cast<const uint8_t *>(rtk.buf), rtk.fil);
+     printHex(reinterpret_cast<const uint8_t *>(crcBuf), rtk.fil << 2);
+     prt = 0;
+    }
+#endif	/* DBG_PRT */
+    rtk.state = RCV_IDLE;
+   }
+   break;
+
+  case RCV_TEXT:
+   if (ch == '\n')
+   {
+    rtk.state = RCV_IDLE;
+   }
+   else
+   {
+
+   }
+   break;
+  }
+ }
+}
+
+#endif	/* RTK_RECV */
+
+#endif	/* GPS_LIB */
 
 #if 0
 #if 0
@@ -978,6 +1018,8 @@ void loop()
 }
 
 #endif
+
+#if !defined(GPS_LIB)
 
 void printHex(const uint8_t *data, size_t len)
 {
@@ -1109,6 +1151,8 @@ int getHex(char **p0)
  *p0 = p1;
  return val;
 }
+
+#endif	/* GPS_LIB */
 
 #if defined(USE_U8X8)
 

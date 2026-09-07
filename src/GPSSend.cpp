@@ -32,9 +32,13 @@ AsyncClient* client = nullptr;
 
 constexpr int port = 8088;
 
+#define GPS_LIB
+
+#if !defined(GPS_LIB)
 #define DBG_PRT
 #if defined(DBG_PRT)
 int prt;
+#endif
 #endif
 
 #if defined(RTK_SEND)
@@ -53,8 +57,6 @@ AsyncServer server(port);
 char ipAddress[20];
 
 #include "dbgPin.h"
-
-#define GPS_LIB
 
 #if defined(GPS_LIB)
 

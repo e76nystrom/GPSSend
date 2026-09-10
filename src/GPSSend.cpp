@@ -1,15 +1,19 @@
-// #if !defined(RTK_SEND)
-// #define RTK_SEND
-// #endif
+#define WIFI_LAN
+#define GPS_LIB
 
-// #if !defined(RTK_RECV)
-// #define RTK_RECV
-// #endif
+#if defined(WIFI_LAN)
 
-#include "esp_netif.h"
+#include "cfg.h"
+#include "wifi.h"
 
-#include <WiFi.h>
-#include <AsyncTCP.h>
+#else
+
+// #include "esp_netif.h"
+//
+// #include <WiFi.h>
+// #include <AsyncTCP.h>
+
+#endif	/* WIFI_LAN */
 
 #define USE_U8X8
 #if defined(RTK_RECV)
@@ -23,14 +27,18 @@
 #include <Wire.h>
 #endif	/* USE_U8X8 */
 
-const char* ssid = "router0";
-const char* password = "candle14salt";
+#if !defined(WIFI_LAN)
 
-#if defined(RTK_SEND)
-AsyncClient* client = nullptr;
-#endif	/* RTK_SEND */
+// const char* ssid = "router0";
+// const char* password = "candle14salt";
+//
+// #if defined(RTK_SEND)
+// AsyncClient* client = nullptr;
+// #endif	/* RTK_SEND */
+//
+// constexpr int port = 8088;
 
-constexpr int port = 8088;
+#endif  /* WIFI_LAN */
 
 #define GPS_LIB
 
@@ -41,20 +49,24 @@ int prt;
 #endif
 #endif
 
-#if defined(RTK_SEND)
-// const char* serverIP = "192.168.0.237";
-constexpr char CLIENT_NAME[] = "cli2";
-#define HOST_NAME CLIENT_NAME
-#endif	/* RTK_SEND */
+#if !defined(WIFI_LAN)
 
-constexpr char SERVER_NAME[] = "srv2";
+// #if defined(RTK_SEND)
+// // const char* serverIP = "192.168.0.237";
+// constexpr char CLIENT_NAME[] = "cli2";
+// #define HOST_NAME CLIENT_NAME
+// #endif	/* RTK_SEND */
+//
+// constexpr char SERVER_NAME[] = "srv2";
+//
+// #if defined(RTK_RECV)
+// AsyncServer server(port);
+// #define HOST_NAME SERVER_NAME
+// #endif	/* RTK_RECV */
+//
+// char ipAddress[20];
 
-#if defined(RTK_RECV)
-AsyncServer server(port);
-#define HOST_NAME SERVER_NAME
-#endif	/* RTK_RECV */
-
-char ipAddress[20];
+#endif	/* WIFI_LAN */
 
 #include "dbgPin.h"
 
@@ -173,204 +185,210 @@ void erase(char x, char y, char len);
 
 #endif	/* USE_U8X8 */
 
-bool connected;
-unsigned int connectTmr;
+#if !defined(WIFI_LAN)
+//
+// bool connected;
+// unsigned int connectTmr;
+//
+// // ── Send state tracking ───────────────────────────────────────────────────────
+// struct SendContext
+// {
+//  size_t   bytesSent;
+//  uint32_t timestamp;   // millis() at send time
+// };
+//
+// static SendContext lastSend = { 0, 0 };
+//
+// void onConnect(void *arg, AsyncClient *c)
+// {
+//  printf("[TCP] Connected to server\n");
+//  IPAddress ip = c->remoteIP();
+//  Serial.printf("Connected to %s at %s\n", SERVER_NAME, ip.toString().c_str());
+//  c->write("Hello from ESP32-S3\n");
+//  connected = true;
+//  connectTmr = 0;
+// }
+//
+// #if defined(RTK_SEND)
+//
+// void onData(void *arg, AsyncClient *c, void *data, size_t len)
+// {
+//  printf("[TCP] Received %u bytes: ", len);
+// }
+//
+// void onAck(void* arg, AsyncClient* c, size_t len, uint32_t time)
+// {
+//  printf("[TCP] ACK: %u bytes acknowledged, round-trip ~%u ms\n",
+//                len, static_cast<unsigned int>(millis() - lastSend.timestamp));
+//
+//  lastSend.bytesSent -= len;  // track how many bytes are still unacknowledged
+//
+//  if (lastSend.bytesSent == 0)
+//  {
+//   printf("[TCP] Send complete: all bytes acknowledged\n");
+//  }
+// }
+//
+// void onDisconnect(void *arg, AsyncClient *c)
+// {
+//  printf("[TCP] Disconnected\n");
+//  c->close();
+//  client = nullptr;
+//
+//  connected = false;
+//  connectTmr = millis();
+// }
+//
+// void onError(void *arg, AsyncClient *c, int8_t error)
+// {
+//  printf("[TCP] Error: %s\n", AsyncClient::errorToString(error));
+//  c->close();
+//  client = nullptr;
+// }
+//
+// void onTimeout(void *arg, AsyncClient *c, uint32_t time)
+// {
+//  printf("[TCP] Timeout at %u ms, disconnecting\n", static_cast<unsigned int>(time));
+//  c->close();
+//  client = nullptr;
+// }
+//
+// // ── Connection helper ────────────────────────────────────────────────────────
+//
+// void connectToServer()
+// {
+//  if (client)
+//   return;			// already alive
+//
+//  connectTmr = millis();
+//
+//  client = new AsyncClient();
+//  client->onConnect   (onConnect,    nullptr);
+//  client->onData      (onData,       nullptr);
+//  client->onAck       (onAck,        nullptr);
+//  client->onDisconnect(onDisconnect, nullptr);
+//  client->onError     (onError,      nullptr);
+//  client->onTimeout   (onTimeout,    nullptr);
+//  client->setRxTimeout(10);	// seconds before timeout fires
+//
+//  printf("[TCP] Connecting to %s:%d\n", SERVER_NAME, port);
+//  if (!client->connect(SERVER_NAME, port))
+//  {
+//   printf("[TCP] connect() failed immediately\n");
+//   delete client;
+//   client = nullptr;
+//  }
+// }
+//
+// // ── Send binary data ──────────────────────────────────────────────────────────
+//
+// bool sendBinary(const uint8_t *data, size_t len)
+// {
+//  if (!connected)
+//  {
+//   printf("[TCP] Cannot send: not connected 1\n");
+//   return false;
+//  }
+//
+//  if (!client || !client->connected())
+//  {
+//   printf("[TCP] Cannot send: not connected 2\n");
+//   return false;
+//  }
+//
+//  if (!client->canSend())
+//  {
+//   printf("[TCP] Cannot send: TX buffer full\n");
+//   return false;
+//  }
+//
+//  size_t available = client->space();
+//  if (available < len)
+//  {
+//   printf("[TCP] Cannot send: need %u bytes, only %u available in TX buffer\n", len, available);
+//   return false;
+//  }
+//
+//  size_t written = client->write(reinterpret_cast<const char *>(data), len);
+//  if (written != len)
+//  {
+//   printf("[TCP] Partial write: sent %u of %u bytes\n", written, len);
+//   return false;
+//  }
+//
+//  printf("[TCP] Sent %u bytes\n", written);
+//  lastSend.timestamp = millis();
+//  return true;
+// }
+//
+// #endif	/* RTK_SEND */
+//
+// #if defined(RTK_RECV)
+//
+// static void onClientData(void *arg, AsyncClient *c,
+//                          void *data, size_t len)
+// {
+//  printf("[%s:%u] Received %u byte(s):\n",
+//         c->remoteIP().toString().c_str(),
+//         c->remotePort(), static_cast<unsigned int>(len));
+//
+//  processRemData(data, len);
+// }
+//
+// static void onClientError(void *arg, AsyncClient *c, int8_t error)
+// {
+//  printf("[%s:%u] Error: %s\n",
+//         c->remoteIP().toString().c_str(),
+//         c->remotePort(),
+//         AsyncClient::errorToString(error));
+// }
+//
+// static void onClientTimeout(void *arg, AsyncClient *c, uint32_t time)
+// {
+//  printf("[%s:%u] Timeout (ACK not received within %u ms)\n",
+//         c->remoteIP().toString().c_str(),
+//         c->remotePort(), static_cast<unsigned int>(time));
+//  c->close();
+// }
+//
+// static void onClientDisconnect(void *arg, AsyncClient *c)
+// {
+//  printf("[%s:%u] Disconnected\n",
+//         c->remoteIP().toString().c_str(),
+//         c->remotePort());
+//  // AsyncTCP frees the client object after this callback returns.
+// }
+//
+// // ─── New connection callback ──────────────────────────────────────────────────
+//
+// static void onNewClient(void* arg, AsyncClient* c)
+// {
+//  Serial.printf("\n[SERVER] New connection from %s:%u\n",
+// 	       c->remoteIP().toString().c_str(),
+// 	       c->remotePort());
+//
+//  // Wire up per-c callbacks
+//  c->onData    (onClientData,       nullptr);
+//  c->onError   (onClientError,      nullptr);
+//  c->onTimeout (onClientTimeout,    nullptr);
+//  c->onDisconnect(onClientDisconnect, nullptr);
+//
+//  // Optional: set a 5-second ACK timeout
+//  c->setAckTimeout(5000);
+//
+//  // Optional: send a greeting frame to the client
+//  const uint8_t greeting[] = { 0x48, 0x65, 0x6C, 0x6C, 0x6F }; // "Hello"
+//  c->write(reinterpret_cast<const char *>(greeting), sizeof(greeting));
+// }
+//
+// #endif	/* RTK_RECV */
 
-// ── Send state tracking ───────────────────────────────────────────────────────
-struct SendContext
-{
- size_t   bytesSent;
- uint32_t timestamp;   // millis() at send time
-};
-
-static SendContext lastSend = { 0, 0 };
-
-void onConnect(void *arg, AsyncClient *c)
-{
- printf("[TCP] Connected to server\n");
- IPAddress ip = c->remoteIP();
- Serial.printf("Connected to %s at %s\n", SERVER_NAME, ip.toString().c_str());
- c->write("Hello from ESP32-S3\n");
- connected = true;
- connectTmr = 0;
-}
-
-#if defined(RTK_SEND)
-
-void onData(void *arg, AsyncClient *c, void *data, size_t len)
-{
- printf("[TCP] Received %u bytes: ", len);
-}
-
-void onAck(void* arg, AsyncClient* c, size_t len, uint32_t time)
-{
- printf("[TCP] ACK: %u bytes acknowledged, round-trip ~%u ms\n",
-               len, static_cast<unsigned int>(millis() - lastSend.timestamp));
-
- lastSend.bytesSent -= len;  // track how many bytes are still unacknowledged
-
- if (lastSend.bytesSent == 0)
- {
-  printf("[TCP] Send complete: all bytes acknowledged\n");
- }
-}
-
-void onDisconnect(void *arg, AsyncClient *c)
-{
- printf("[TCP] Disconnected\n");
- c->close();
- client = nullptr;
-
- connected = false;
- connectTmr = millis();
-}
-
-void onError(void *arg, AsyncClient *c, int8_t error)
-{
- printf("[TCP] Error: %s\n", AsyncClient::errorToString(error));
- c->close();
- client = nullptr;
-}
-
-void onTimeout(void *arg, AsyncClient *c, uint32_t time)
-{
- printf("[TCP] Timeout at %u ms, disconnecting\n", static_cast<unsigned int>(time));
- c->close();
- client = nullptr;
-}
-
-// ── Connection helper ────────────────────────────────────────────────────────
-
-void connectToServer()
-{
- if (client)
-  return;			// already alive
-
- connectTmr = millis();
-
- client = new AsyncClient();
- client->onConnect   (onConnect,    nullptr);
- client->onData      (onData,       nullptr);
- client->onAck       (onAck,        nullptr);
- client->onDisconnect(onDisconnect, nullptr);
- client->onError     (onError,      nullptr);
- client->onTimeout   (onTimeout,    nullptr);
- client->setRxTimeout(10);	// seconds before timeout fires
-
- printf("[TCP] Connecting to %s:%d\n", SERVER_NAME, port);
- if (!client->connect(SERVER_NAME, port))
- {
-  printf("[TCP] connect() failed immediately\n");
-  delete client;
-  client = nullptr;
- }
-}
-
-// ── Send binary data ──────────────────────────────────────────────────────────
-
-bool sendBinary(const uint8_t *data, size_t len)
-{
- if (!connected)
- {
-  printf("[TCP] Cannot send: not connected 1\n");
-  return false;
- }
-
- if (!client || !client->connected())
- {
-  printf("[TCP] Cannot send: not connected 2\n");
-  return false;
- }
-
- if (!client->canSend())
- {
-  printf("[TCP] Cannot send: TX buffer full\n");
-  return false;
- }
-
- size_t available = client->space();
- if (available < len)
- {
-  printf("[TCP] Cannot send: need %u bytes, only %u available in TX buffer\n", len, available);
-  return false;
- }
-
- size_t written = client->write(reinterpret_cast<const char *>(data), len);
- if (written != len)
- {
-  printf("[TCP] Partial write: sent %u of %u bytes\n", written, len);
-  return false;
- }
-
- printf("[TCP] Sent %u bytes\n", written);
- lastSend.timestamp = millis();
- return true;
-}
-
-#endif	/* RTK_SEND */
-
-#if defined(RTK_RECV)
-
-static void onClientData(void *arg, AsyncClient *c,
-                         void *data, size_t len)
-{
- printf("[%s:%u] Received %u byte(s):\n",
-        c->remoteIP().toString().c_str(),
-        c->remotePort(), static_cast<unsigned int>(len));
-
- processRemData(data, len);
-}
-
-static void onClientError(void *arg, AsyncClient *c, int8_t error)
-{
- printf("[%s:%u] Error: %s\n",
-        c->remoteIP().toString().c_str(),
-        c->remotePort(),
-        AsyncClient::errorToString(error));
-}
-
-static void onClientTimeout(void *arg, AsyncClient *c, uint32_t time)
-{
- printf("[%s:%u] Timeout (ACK not received within %u ms)\n",
-        c->remoteIP().toString().c_str(),
-        c->remotePort(), static_cast<unsigned int>(time));
- c->close();
-}
-
-static void onClientDisconnect(void *arg, AsyncClient *c)
-{
- printf("[%s:%u] Disconnected\n",
-        c->remoteIP().toString().c_str(),
-        c->remotePort());
- // AsyncTCP frees the client object after this callback returns.
-}
-
-// ─── New connection callback ──────────────────────────────────────────────────
-
-static void onNewClient(void* arg, AsyncClient* c)
-{
- Serial.printf("\n[SERVER] New connection from %s:%u\n",
-	       c->remoteIP().toString().c_str(),
-	       c->remotePort());
-
- // Wire up per-c callbacks
- c->onData    (onClientData,       nullptr);
- c->onError   (onClientError,      nullptr);
- c->onTimeout (onClientTimeout,    nullptr);
- c->onDisconnect(onClientDisconnect, nullptr);
-
- // Optional: set a 5-second ACK timeout
- c->setAckTimeout(5000);
-
- // Optional: send a greeting frame to the client
- const uint8_t greeting[] = { 0x48, 0x65, 0x6C, 0x6C, 0x6F }; // "Hello"
- c->write(reinterpret_cast<const char *>(greeting), sizeof(greeting));
-}
-
-#endif	/* RTK_RECV */
+#endif	/* WIFI_LAN */
 
 void setup()
 {
+ buildCRC24qTable();
+
  Serial.begin(115200);
  printf("starting\n");
 
@@ -384,40 +402,47 @@ void setup()
  printf("UART2 initialized\n");
  Serial2.printf("started\n\r");
 
- pinMode(DBG0_PIN, OUTPUT);
- pinMode(DBG1_PIN, OUTPUT);
+ dbgInit();
 
- WiFiClass::mode(WIFI_STA);
- WiFiClass::setHostname(HOST_NAME);
- 
- Serial.printf("Attempting to set hostname to: %s\n", HOST_NAME);
- esp_netif_t *netIf = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
- esp_netif_set_hostname(netIf, HOST_NAME);
+#if defined(WIFI_LAN)
 
- WiFi.begin(ssid, password);
- printf("wait for wifi connection\n");
- while (WiFi.status() != WL_CONNECTED)
- {
-  delay(500);
-  printf("%d ", WiFi.status());
-  printf(".");
- }
- printf("\n");
+ wifiInit();
 
- const char *tmpBuf = nullptr;
- const esp_err_t err = esp_netif_get_hostname(netIf, &tmpBuf);
- if (err == ESP_OK)
- {
-  Serial.printf("Hostname %s\n", tmpBuf);
- }
- else
- {
-  Serial.printf("hostname lookup error %d\n", err);
- }
+#else
+ //
+ // WiFiClass::mode(WIFI_STA);
+ // WiFiClass::setHostname(HOST_NAME);
+ //
+ // Serial.printf("Attempting to set hostname to: %s\n", HOST_NAME);
+ // esp_netif_t *netIf = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+ // esp_netif_set_hostname(netIf, HOST_NAME);
+ //
+ // WiFi.begin(ssid, password);
+ // printf("wait for wifi connection\n");
+ // while (WiFi.status() != WL_CONNECTED)
+ // {
+ //  delay(500);
+ //  printf("%d ", WiFi.status());
+ //  printf(".");
+ // }
+ // printf("\n");
+ //
+ // const char *tmpBuf = nullptr;
+ // const esp_err_t err = esp_netif_get_hostname(netIf, &tmpBuf);
+ // if (err == ESP_OK)
+ // {
+ //  Serial.printf("Hostname %s\n", tmpBuf);
+ // }
+ // else
+ // {
+ //  Serial.printf("hostname lookup error %d\n", err);
+ // }
+ //
+ // strncpy(ipAddress, WiFi.localIP().toString().c_str(), sizeof(ipAddress));
+ //
+ // printf("WiFi connected IP %s %d\n", ipAddress, WiFi.RSSI());
 
- strncpy(ipAddress, WiFi.localIP().toString().c_str(), sizeof(ipAddress));
-
- printf("WiFi connected IP %s %d\n", ipAddress, WiFi.RSSI());
+#endif	/* WIFI_LAN */
   
 #if defined(USE_U8X8)
  drawString(0, 0, ipAddress);
@@ -427,20 +452,26 @@ void setup()
  drawString(15, 0, tmp);
 #endif	/* USE_U8X8 */
 
- buildCRC24qTable();
-
 #if 0
  i0 = 0;
 #endif 
 
-#if defined(RTK_SEND)
- connectToServer();
-#endif	/* RTK_SEND */
+#if defined(WIFI_LAN)
 
-#if defined(RTK_RECV)
- server.onClient(onNewClient, nullptr);
- server.begin();
-#endif	/* RTK_RECEIVE */
+ wifiConnect();
+
+#else
+
+// #if defined(RTK_SEND)
+//  connectToServer();
+// #endif	/* RTK_SEND */
+//
+// #if defined(RTK_RECV)
+//  server.onClient(onNewClient, nullptr);
+//  server.begin();
+// #endif	/* RTK_RECEIVE */
+
+#endif	/* WWIFI_LAN */
 
  rtk.state = RCV_IDLE;
  rtk.t0 = millis();
@@ -454,16 +485,19 @@ void setup()
 
 #if 1
 
-unsigned int tmr0;
-
 void loop()
 {
+ static unsigned int tmr0;
  unsigned int t0 = millis();
  if ((t0 - tmr0) > 1000)
  {
   tmr0 = t0;
 
-  const signed char rssi = WiFi.RSSI();
+#if defined(WIFI_LAN)
+  const signed char rssi = wifiRSSI();
+#else
+  // const signed char rssi = WiFi.RSSI();
+#endif
   const float temp = temperatureRead();
 
 #if defined(USE_U8X8)

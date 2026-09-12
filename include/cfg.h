@@ -12,4 +12,6 @@ inline char SERVER_NAME[] = "srv2";
 #define HOST_NAME SERVER_NAME
 #endif	/* RTK_RECV */
 
+#define PORT 8088
+
 #endif

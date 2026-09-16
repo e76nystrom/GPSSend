@@ -6,19 +6,9 @@
 #include "cfg.h"
 #include "wifi.h"
 
-#else
-
-// #include "esp_netif.h"
-//
-// #include <WiFi.h>
-// #include <AsyncTCP.h>
-
 #endif	/* WIFI_LAN */
 
 #define USE_U8X8
-
-#if defined(RTK_RECV)
-#endif	/* USE_U8X8 */
 
 #include "esp_timer.h"
 
@@ -27,16 +17,6 @@
 #include <Wire.h>
 #endif	/* USE_U8X8 */
 
-#define GPS_LIB
-
-#if !defined(GPS_LIB)
-#define DBG_PRT
-#if defined(DBG_PRT)
-int prt;
-#endif
-#endif
-
-#include "dbgPin.h"
 #include "gpsLib.h"
 
 #if defined(USE_U8X8)
@@ -71,6 +51,14 @@ void setup()
  printf("UART2 initialized\n");
  Serial2.printf("started\n\r");
 
+#if defined(SERVER)
+ printf("server\n");
+#endif	/* SERVER */
+
+#if defined(CLIENT)
+ printf("client\n");
+#endif	/* CLIENT */
+
  dbgInit();
 
  wifiInit();
@@ -98,8 +86,7 @@ void setup()
 void loop()
 {
  static unsigned int tmr0;
- unsigned int t0 = millis();
- if ((t0 - tmr0) > 1000)
+ if (unsigned int t0 = millis(); (t0 - tmr0) > 1000)
  {
   tmr0 = t0;
 
@@ -112,9 +99,38 @@ void loop()
   drawString(0, 1, buf);
 #endif	/* USE_U8X8 */
 
-#if defined(RTK_SEND)
+  printf("connected %d\n", static_cast<int>(connected));
 
-  if (!connected)
+#if defined(SERVER)
+  if (connected)
+  {
+   if (t0 - lastSend.timestamp > 5000)
+   {
+    lastSend.timestamp = t0;
+    if (client != nullptr)
+    {
+     client->write("PING\n");
+     printf("send ping\n");
+    }
+   }
+  }
+#endif  /* SERVER */
+
+#if defined(CLIENT)
+
+  if (connected)
+  {
+   if (t0 - lastSend.timestamp > 5000)
+   {
+    lastSend.timestamp = t0;
+    if (client != nullptr)
+    {
+     client->write("PING\n");
+     printf("send ping\n");
+    }
+   }
+  }
+  else
   {
    if ((millis() - connectTmr) > 5000)
    {
@@ -124,7 +140,7 @@ void loop()
    }
   }
 
-#endif	/* RTK_SEND */
+#endif	/* CLIENT */
  }
 
  pollSerial();

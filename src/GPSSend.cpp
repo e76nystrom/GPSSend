@@ -73,8 +73,8 @@ void setup()
 
  wifiConnect();
 
- rtk.state = RCV_IDLE;
- rtk.t0 = millis();
+ rtk.ser.state = RCV_IDLE;
+ rtk.ser.t = millis();
 
 #if defined(DBG_PRT)
  prt = 0;

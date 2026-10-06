@@ -1,9 +1,7 @@
-#define WIFI_LAN
 #define GPS_LIB
 
 #if defined(WIFI_LAN)
 
-#include "cfg.h"
 #include "wifi.h"
 
 #endif	/* WIFI_LAN */
@@ -20,6 +18,9 @@
 #include "gpsLib.h"
 
 #if defined(USE_U8X8)
+
+#define U8X8_SDA 45
+#define U8X8_SCL 47
 
 U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset */ U8X8_PIN_NONE); // GPIO 8 SDA, GPIO 9 SCL
 
@@ -61,17 +62,35 @@ void setup()
 
  dbgInit();
 
- wifiInit();
-  
+#if defined(WIFI_LAN)
+
+#if defined(SERVER)
+ wifiInit(SERVER_NAME);
+#endif	/* SERVER */
+
+#if defined(CLIENT)
+wifiInit(CLIENT_NAME);
+#endif	/* CLIENT */
+
 #if defined(USE_U8X8)
  drawString(0, 0, ipAddress);
  char tmp[2];
- tmp[0] = HOST_NAME[0];
+
+#if defined(SERVER)
+ tmp[0] = 'S';
+#endif  /* SERVER */
+
+#if defined(CLIENT)
+ tmp[0] = 'C';
+#endif  /* CLIENT */
+
  tmp[1] = 0;
  drawString(15, 0, tmp);
 #endif	/* USE_U8X8 */
 
  wifiConnect();
+
+#endif  /* WIFI_LAN */
 
  rtk.ser.state = RCV_IDLE;
  rtk.ser.t = millis();
@@ -90,18 +109,22 @@ void loop()
  {
   tmr0 = t0;
 
-  const signed char rssi = wifiRSSI();
-  const float temp = temperatureRead();
-
 #if defined(USE_U8X8)
   char buf[20];
+  const float temp = temperatureRead();
+#if defined(WIFI_LAN)
+  const signed char rssi = wifiRSSI();
   snprintf(buf, sizeof(buf), "%3d %4.1f %4d ", rssi, temp, rtk.rxCount);
+#endif  /* WIFI_LAN */
   drawString(0, 1, buf);
 #endif	/* USE_U8X8 */
 
+#if defined(WIFI_LAN)
   printf("connected %d\n", static_cast<int>(connected));
+#endif  /* WIFI_LAN */
 
 #if defined(SERVER)
+#if defined(WIFI_LAN)
   if (connected)
   {
    if (t0 - lastSend.timestamp > 5000)
@@ -114,9 +137,11 @@ void loop()
     }
    }
   }
+#endif  /* WIFI_LAN */
 #endif  /* SERVER */
 
 #if defined(CLIENT)
+#if defined(WIFI_LAN)
 
   if (connected)
   {
@@ -140,6 +165,7 @@ void loop()
    }
   }
 
+#endif  /* WIFI_LAN */
 #endif	/* CLIENT */
  }
 
@@ -308,7 +334,13 @@ size_t drawFloat(char x, char y, float floatNumber, uint8_t dp)
 
 void initDisplay()
 {
+#if defined(CLIENT)
  Wire.setPins(8, 9);		// Set SDA to GPIO 8, SCL to GPIO 9
+#endif
+#if defined(SERVER)
+ printf("sca %d scl %d", U8X8_SDA, U8X8_SCL);
+ Wire.setPins(U8X8_SDA, U8X8_SCL);
+#endif
  u8x8.begin();
 
  u8x8.setFont(u8x8_font_chroma48medium8_r);
